@@ -1,0 +1,6 @@
+auth.c
+    * implement encryption
+
+response.c
+    * the parser segfaults on weird input
+    * do something about error-reporting

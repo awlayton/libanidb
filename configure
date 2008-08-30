@@ -1,0 +1,282 @@
+#!/bin/sh
+
+#
+#   configure
+#   libanidb
+#
+#   Created by Andreas Meingast on 17.03.07.
+#   Copyright 2007 Andreas Meingast. All rights reserved.
+#
+#   $Id: configure 1 2007-03-24 13:06:42Z ameingast $
+#
+#
+
+SYSTEM=""
+PREFIX="/usr/local"
+CC="${CC-cc}"
+CFLAGS="${CFLAGS--Wall -pedantic -std=c99 -g}"
+CXX="${CXX-c++}"
+CXXFLAGS="${CFLAGS--Wall -pedantic -g}"
+LDFLAGS="${LDFLAGS}"
+PTHREAD="no"
+OPENSSL="no"
+
+VERBOSE="no"
+TMPFILE="build/libanidb_configure.c"
+OUTFILE="${TMPFILE}.o"
+
+#
+#   standard usage information
+#
+usage()
+{
+    cat << EOT
+
+Configure Options:
+    --disable-openssl
+    --prefix=PATH
+    --verbose
+    --help
+
+Environmental Variables:
+    CC
+    CFLAGS
+    LDFLAGS
+
+EOT
+}
+
+#
+#   verbosly execute a command
+#
+_do()
+{
+    _echo ${@}
+    ${@} > /dev/null 2>&1
+    return "${?}"
+}
+
+#
+#   echoes arguments iff $VERBOSE = yes
+#
+_echo()
+{
+    [ x"${VERBOSE}" = x"yes" ] && echo -n -e ${@}
+}
+
+#
+#   cleanup and fail with reason $@
+#
+_fail()
+{
+    _cleanup
+    echo "FAILED: ${@}" 1>&2
+    exit 1
+}
+
+#
+#   cleans up temp files
+#
+_cleanup()
+{
+    rm -f "${TMPFILE}" "${OUTFILE}"
+}
+
+#
+#   check if we have a working compiler on board
+#
+test_cc()
+{
+    _echo "Checking compiler...\t"
+    cat > "${TMPFILE}" << EOT
+int main(int argc, char **argv) { return 0; }
+EOT
+    if _do "${CC}" -o "${OUTFILE}" "${TMPFILE}"; then
+        _echo "\t[ OK ]\n"
+    else
+        _echo "\t[ FAILED ]\n"
+    fi
+}
+
+#
+# check all includes in Source/anidb/*.{c,h} except those in platform.{c,h},
+# because that would kinda defeat the purpose of having an extra platform-layer
+#
+test_cc_includes()
+{
+    _echo "Checking headers...\t"
+    rm -f "${TMPFILE}" "${OUTFILE}"
+    for INCLUDE in $(grep "#include <" `ls -1 Source/anidb/* |
+        grep -v platform` | awk '{print $2}' | grep -v "anidb" |
+        grep -v include | sort | uniq); do
+        echo "#include ${INCLUDE}" >> "${TMPFILE}"
+    done
+    cat >> "${TMPFILE}" << EOT
+int main(int argc, char **argv) { return 0; }
+EOT
+    if _do "${CC}" -o "${OUTFILE}" "${TMPFILE}"; then
+        _echo "\t[ OK ]\n"
+    else
+        _echo "\t[ FAILED ]\n"
+    fi
+}
+
+#
+#   test if we have some openssl libraries installed
+#
+test_openssl()
+{
+    _echo "Checking for OpenSSL support...\t"
+    rm -f "${TMPFILE}" "${OUTFILE}"
+    cat > "${TMPFILE}" << EOT
+    #include <stdlib.h>
+    #include <openssl/aes.h>
+    #include <openssl/evp.h>
+    int main(int argc, char **argv) { AES_encrypt(NULL, NULL, NULL); return 0; }
+EOT
+    if _do "${CC}" -o "${OUTFILE}" "${TMPFILE}" -lcrypto; then
+        _echo "\t[ OK ]\n"
+        OPENSSL="yes"
+    else
+        _echo "\t[ FAILED ]\n"
+        OPENSSL="no"
+    fi
+}
+
+#
+#   libanidb only runs on a limited number of platforms; checking is done here
+#
+test_host()
+{
+    _echo "Checking operating system...\t"
+    SYSTEM="`uname -s`"
+    case "${SYSTEM}" in
+        "Darwin"    )   test_host_darwin                            ;;
+        "Linux"     )   test_host_linux                             ;;
+        "FreeBSD"   )   test_host_bsd                               ;;
+        "NetBSD"    )   test_host_bsd                               ;;
+        "OpenBSD"   )   test_host_bsd                               ;;
+        "BeOS"      )   test_host_beos                              ;;
+        *           )   _echo "\t[ FAILED ]\n"
+                        _fail "Unsupported operating system: ${SYSTEM}"
+                                                                    ;;
+    esac
+}
+
+#
+#   Darwin specific platform tests (i.e. check for the developer kit)
+#
+test_host_darwin()
+{
+    if [ ! -d /Developer/SDKs/MacOSX10.4u.sdk ]; then
+        _echo "\t[ FAILED ]\n"
+        cat << EOT
+To be able to build libAniDB on Mac OS X, you will need to install the
+Universal SDK.
+EOT
+    else
+        PTHREAD="yes"
+        SEMAPHORE="yes"
+        _echo "\t[ OK ]\n"
+    fi
+}
+
+#
+#   TODO: Linux specific platform tests
+#
+test_host_linux()
+{
+    PTHREAD="yes"
+    SEMAPHORE="yes"
+    _echo "\t[ OK ]\n"
+}
+
+#
+#   TODO: BSD specific platform tests
+#
+test_host_bsd()
+{
+    PTHREAD="yes"
+    SEMAPHORE="no"
+    _echo "\t[ FAILED ]\n"
+}
+
+#
+#   TODO: BeOS specific platform tests
+#
+test_host_beos()
+{
+    PTHREAD="yes"
+    SEMAPHORE="yes"
+    _echo "\t[ OK ]\n"
+}
+
+#
+#   generates config.mk which is used by Makefile; any make-specific options
+#   should be put into the file
+#
+gen_makefile()
+{
+    rm -f "Resources/MK/config.mk"
+    cat > "Resources/MK/config.mk" << EOT
+SYSTEM          = ${SYSTEM}
+PREFIX          = ${PREFIX}
+PTHREAD         = ${PTHREAD}
+SEMAPHORE       = ${SEMAPHORE}
+OPENSSL         = ${OPENSSL}
+CC              = ${CC}
+CFLAGS          = ${CFLAGS}
+CXX             = ${CXX}
+CXXFLAGS        = ${CXXFLAGS}
+LDFLAGS         = ${LDFLAGS}
+EOT
+}
+
+#
+#   Main
+#
+main()
+{
+    for ARG in "${@}"; do
+        # parse arguments of form arg=val to ARG=arg and VAL=val
+        VAL=$(echo ${ARG} | awk -F = '{print $2}')
+        ARG=$(echo ${ARG} | awk -F = '{print $1}')
+        case "${ARG}" in
+            "--disable-openssl" )
+                OPENSSL="no"
+            ;;
+            "--prefix" )
+                PREFIX="${VAL}"
+            ;;
+            "--verbose" )
+                VERBOSE="yes"
+            ;;
+            "--help" | * )
+                usage
+                exit 0
+            ;;
+        esac
+    done
+
+    # create infrastructure
+    [ ! -d build ] && mkdir build
+
+    # check host
+    test_host
+
+    # compiler and library tests
+    test_cc
+    test_cc_includes
+    test_openssl
+
+    # create makefiles
+    gen_makefile
+
+    # delete tmp files
+    _cleanup
+}
+
+#
+#   Default Entry point
+#
+main ${@}
