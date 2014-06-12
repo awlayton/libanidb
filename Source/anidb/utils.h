@@ -15,8 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int errno;
-extern int h_errno;
+#include <errno.h>
 
 #if defined(__cplusplus)
  #define ANI_BEGIN_C_DECLS      extern "C" {
